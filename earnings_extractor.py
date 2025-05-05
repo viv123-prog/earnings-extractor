@@ -8,29 +8,27 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 import os
 
-# Remove any proxy settings to avoid OpenAI connection issues
-for proxy in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]:
-    os.environ.pop(proxy, None)
+# Ensure no proxy interference
+for proxy_var in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]:
+    os.environ.pop(proxy_var, None)
 
-# Initialize OpenAI client - SAFEST VERSION
+# Initialize OpenAI using global config
 try:
-    # 1. Verify API key exists
     if "openai_api_key" not in st.secrets:
         st.error("❌ Missing API key. Add it to secrets.toml as 'openai_api_key = \"sk-...\"'")
         st.stop()
 
-    # 2. Set API key
     openai.api_key = st.secrets["openai_api_key"]
 
-    # 3. Quick test connection
     with st.spinner("🔌 Testing OpenAI connection..."):
-        openai.Model.list()  # Lightweight call to test connectivity
+        # Test with a simple call (Model list)
+        openai.models.list()
+
     st.success("✅ OpenAI connected successfully!")
 
 except Exception as e:
     st.error(f"🚨 OpenAI initialization failed. Error: {str(e)}")
     st.stop()
-
 
 # Define financial metrics and their Indian-specific aliases
 financial_metrics = [
