@@ -6,10 +6,17 @@ import re
 import json
 from openpyxl import load_workbook
 from openpyxl.styles import Font
-from openai import OpenAI
+import httpx
 
-# Initialize client USING the secret (not storing the key here)
-client = OpenAI(api_key=st.secrets["openai_api_key"])  # ← Reads from secrets
+# Initialize OpenAI client (simplified version without proxies)
+try:
+    client = OpenAI(api_key=st.secrets["openai_api_key"])
+except KeyError:
+    st.error("OpenAI API key not found in secrets. Please add it to secrets.toml or Streamlit Cloud settings.")
+    st.stop()
+except Exception as e:
+    st.error(f"Failed to initialize OpenAI client: {str(e)}")
+    st.stop()
 
 # Define financial metrics and their Indian-specific aliases
 financial_metrics = [
