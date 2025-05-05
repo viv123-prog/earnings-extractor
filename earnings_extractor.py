@@ -1,21 +1,29 @@
 import streamlit as st
 import fitz  # PyMuPDF
-from openai import OpenAI
+from openai import OpenAI  # Only import once
 import pandas as pd
 import re
 import json
 from openpyxl import load_workbook
 from openpyxl.styles import Font
-import httpx
 
-# Initialize OpenAI client (simplified version without proxies)
+# Initialize OpenAI client - SAFEST VERSION
 try:
+    # 1. First verify secrets exist
+    if "openai_api_key" not in st.secrets:
+        st.error("❌ Missing API key. Add it to secrets.toml as 'openai_api_key = \"sk-...\"'")
+        st.stop()
+    
+    # 2. Initialize without proxies (works for 99% of users)
     client = OpenAI(api_key=st.secrets["openai_api_key"])
-except KeyError:
-    st.error("OpenAI API key not found in secrets. Please add it to secrets.toml or Streamlit Cloud settings.")
-    st.stop()
+    
+    # 3. Quick test connection (optional)
+    with st.spinner("🔌 Testing OpenAI connection..."):
+        client.models.list()  # Lightweight API call to verify connectivity
+    st.success("✅ OpenAI connected successfully!")
+
 except Exception as e:
-    st.error(f"Failed to initialize OpenAI client: {str(e)}")
+    st.error(f"🚨 OpenAI initialization failed. Error: {str(e)}")
     st.stop()
 
 # Define financial metrics and their Indian-specific aliases
