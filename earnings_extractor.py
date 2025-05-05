@@ -6,9 +6,10 @@ import re
 import json
 from openpyxl import load_workbook
 from openpyxl.styles import Font
+from openai import OpenAI
 
-# Initialize the OpenAI client
-client = OpenAI(api_key=st.secrets["openai_api_key"])
+# Initialize client USING the secret (not storing the key here)
+client = OpenAI(api_key=st.secrets["openai_api_key"])  # ← Reads from secrets
 
 # Define financial metrics and their Indian-specific aliases
 financial_metrics = [
