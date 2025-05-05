@@ -7,56 +7,66 @@ import json
 from openpyxl import load_workbook
 from openpyxl.styles import Font
 import os
+import httpx
+import logging
 
-# Ensure no proxy interference
-for proxy_var in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]:
-    os.environ.pop(proxy_var, None)
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Initialize OpenAI using global config
+# Clear proxy environment variables
+proxy_vars = ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]
+for var in proxy_vars:
+    if var in os.environ:
+        logger.info(f"Removing {var} from environment")
+        os.environ.pop(var, None)
+
+# Log current proxy settings for debugging
+logger.info("Current proxy settings: %s", {k: v for k, v in os.environ.items() if 'proxy' in k.lower()})
+
+# Initialize OpenAI client with explicit proxy bypass
 try:
     if "openai_api_key" not in st.secrets:
         st.error("❌ Missing API key. Add it to secrets.toml as 'openai_api_key = \"sk-...\"'")
         st.stop()
 
-    # Create OpenAI client with the API key
-    client = OpenAI(api_key=st.secrets["openai_api_key"])
+    # Create HTTP client with no proxies
+    http_client = httpx.Client(proxies=None)
+    
+    # Initialize OpenAI client
+    client = OpenAI(
+        api_key=st.secrets["openai_api_key"],
+        http_client=http_client
+    )
 
     with st.spinner("🔌 Testing OpenAI connection..."):
-        # Test with a simple call (Model list)
+        # Test connection with a simple call
         client.models.list()
 
     st.success("✅ OpenAI connected successfully!")
 
 except Exception as e:
     st.error(f"🚨 OpenAI initialization failed. Error: {str(e)}")
+    logger.error("OpenAI initialization error: %s", str(e))
     st.stop()
 
-# Define financial metrics and their Indian-specific aliases
+# Define financial metrics and aliases (unchanged)
 financial_metrics = [
-    # Profit & Loss Statement Metrics
     "Total Revenue", "Net Profit", "EBITDA", "EBIT", "Gross Profit", 
     "Operating Profit", "Profit Before Tax", "Profit After Tax",
     "Other Income", "Exceptional Items", "Tax Expense", "Finance Costs",
     "Depreciation", "Amortization", "Employee Benefits Expense",
-    
-    # Balance Sheet Metrics
     "Share Capital", "Reserves and Surplus", "Total Borrowings",
     "Current Liabilities", "Non-Current Liabilities", 
     "Current Assets", "Fixed Assets", "Investments",
     "Cash and Bank Balances", "Loans and Advances",
     "Trade Receivables", "Inventory", "Trade Payables",
-    
-    # Segment Reporting
     "Segment Revenue - Domestic", "Segment Revenue - Exports",
     "Segment Revenue - Business Unit 1", "Segment Revenue - Business Unit 2",
     "Segment Profit - Domestic", "Segment Profit - Exports",
-    
-    # Cash Flow Statement
     "Cash Flow from Operations", "Cash Flow from Investing",
     "Cash Flow from Financing", "Net Cash Flow",
     "Cash and Cash Equivalents at End of Period",
-    
-    # Key Ratios and Per Share Data
     "EPS (Basic)", "EPS (Diluted)", "Book Value per Share",
     "Dividend per Share", "Dividend Payout Ratio",
     "Return on Equity", "Return on Capital Employed",
@@ -64,44 +74,41 @@ financial_metrics = [
 ]
 
 metric_aliases = {
-    # Profit & Loss
     "Total Revenue": ["Turnover", "Total Income", "Net Sales", "Revenue from Operations"],
     "Net Profit": ["Profit for the Period", "PAT", "Net Profit After Tax"],
     "EBITDA": ["Operating Profit Before Depreciation", "PBITDA"],
     "Gross Profit": ["Gross Margin", "Trading Profit"],
     "Finance Costs": ["Interest Expense", "Borrowing Costs"],
-    
-    # Balance Sheet
     "Reserves and Surplus": ["Retained Earnings", "General Reserve"],
     "Total Borrowings": ["Total Debt", "Secured Loans", "Unsecured Loans"],
     "Trade Receivables": ["Sundry Debtors", "Accounts Receivable"],
     "Trade Payables": ["Sundry Creditors", "Accounts Payable"],
-    
-    # Segment Reporting
     "Segment Revenue - Domestic": ["India Revenue", "Local Market Sales"],
     "Segment Revenue - Exports": ["Overseas Revenue", "Foreign Sales"],
-    
-    # Cash Flow
     "Cash Flow from Operations": ["Net Cash from Operating Activities"],
     "Cash and Cash Equivalents at End of Period": ["Closing Cash Balance"],
-    
-    # Ratios
     "Return on Equity": ["ROE", "Return on Net Worth"],
     "Return on Capital Employed": ["ROCE", "Return on Investment"]
 }
 
 def extract_text_from_pdf(pdf_file):
     """Extract text from PDF with Indian financial report handling"""
-    doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-    text = ""
-    for page in doc:
-        text += page.get_text()
-    
-    # Clean Indian-specific formatting
-    text = re.sub(r"\(Rs\. in [Cc]rores?\)", "", text)
-    text = re.sub(r"\(₹ in [Cc]rores?\)", "", text)
-    text = re.sub(r"\(USD in [Mm]illions?\)", "", text)
-    return text
+    try:
+        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text()
+        
+        # Clean Indian-specific formatting
+        text = re.sub(r"\(Rs\. in [Cc]rores?\)", "", text)
+        text = re.sub(r"\(₹ in [Cc]rores?\)", "", text)
+        text = re.sub(r"\(USD in [Mm]illions?\)", "", text)
+        logger.info("PDF text extracted successfully")
+        return text
+    except Exception as e:
+        logger.error("PDF extraction error: %s", str(e))
+        st.error(f"PDF extraction failed: {str(e)}")
+        return ""
 
 def detect_quarters(text):
     """Detect Indian financial quarters"""
@@ -152,9 +159,11 @@ Text to analyze:
             response_format={"type": "json_object"}
         )
         content = response.choices[0].message.content
+        logger.info(f"Data extracted for {quarter_section}")
         return json.loads(content)
     except Exception as e:
-        st.error(f"Error extracting data for {quarter_section}: {e}")
+        logger.error(f"Error extracting data for {quarter_section}: %s", str(e))
+        st.error(f"Error extracting data for {quarter_section}: {str(e)}")
         return {metric: "N/A" for metric in financial_metrics}
 
 def calculate_financial_ratios(df):
@@ -176,11 +185,14 @@ def calculate_financial_ratios(df):
             gp = pd.to_numeric(df.loc["Gross Profit", quarter], errors='coerce') if "Gross Profit" in df.index else 0
             op = pd.to_numeric(df.loc["Operating Profit", quarter], errors='coerce') if "Operating Profit" in df.index else 0
             np_val = pd.to_numeric(df.loc["Net Profit", quarter], errors='coerce') if "Net Profit" in df.index else 0
-            te = pd.to_numeric(df.loc["Shareholder Equity", quarter], errors='coerce') if "Shareholder Equity" in df.index else 0
+            te = pd.to_numeric(df.loc["Share Capital", quarter], errors='coerce') + pd.to_numeric(df.loc["Reserves and Surplus", quarter], errors='coerce') if ("Share Capital" in df.index and "Reserves and Surplus" in df.index) else 0
             borrowings = pd.to_numeric(df.loc["Total Borrowings", quarter], errors='coerce') if "Total Borrowings" in df.index else 0
             interest = pd.to_numeric(df.loc["Finance Costs", quarter], errors='coerce') if "Finance Costs" in df.index else 1
             shares = pd.to_numeric(df.loc["Shares Outstanding", quarter], errors='coerce') if "Shares Outstanding" in df.index else 1
             dividends = pd.to_numeric(df.loc["Dividend per Share", quarter], errors='coerce') if "Dividend per Share" in df.index else 0
+            current_assets = pd.to_numeric(df.loc["Current Assets", quarter], errors='coerce') if "Current Assets" in df.index else 0
+            current_liabilities = pd.to_numeric(df.loc["Current Liabilities", quarter], errors='coerce') if "Current Liabilities" in df.index else 1
+            inventory = pd.to_numeric(df.loc["Inventory", quarter], errors='coerce') if "Inventory" in df.index else 0
             
             # Calculate ratios
             ratios.at["Gross Margin (%)", quarter] = f"{(gp/rev*100):.1f}%" if rev != 0 else "N/A"
@@ -191,11 +203,15 @@ def calculate_financial_ratios(df):
             ratios.at["Interest Coverage Ratio", quarter] = f"{(op/interest):.2f}" if interest != 0 else "N/A"
             ratios.at["Book Value per Share (₹)", quarter] = f"₹{(te/shares):.2f}" if shares != 0 else "N/A"
             ratios.at["Dividend Payout Ratio (%)", quarter] = f"{(dividends/(np_val/shares)*100):.1f}%" if np_val != 0 and shares != 0 else "N/A"
+            ratios.at["Current Ratio", quarter] = f"{(current_assets/current_liabilities):.2f}" if current_liabilities != 0 else "N/A"
+            ratios.at["Quick Ratio", quarter] = f"{((current_assets - inventory)/current_liabilities):.2f}" if current_liabilities != 0 else "N/A"
         
         st.dataframe(ratios.style.highlight_null(color='lightyellow'))
+        logger.info("Financial ratios calculated")
         return ratios
     
     except Exception as e:
+        logger.error(f"Ratio calculation error: %s", str(e))
         st.error(f"Ratio calculation error: {str(e)}")
         return pd.DataFrame()
 
@@ -235,8 +251,10 @@ Format as bullet points with emojis:
             )
             insights = response.choices[0].message.content
             st.markdown(insights)
+            logger.info("AI insights generated")
     
     except Exception as e:
+        logger.error(f"Insight generation error: %s", str(e))
         st.error(f"Couldn't generate insights: {str(e)}")
 
 def main():
@@ -246,6 +264,8 @@ def main():
     
     if uploaded_file is not None:
         full_text = extract_text_from_pdf(uploaded_file)
+        if not full_text:
+            st.stop()
         st.success("PDF text extracted successfully!")
         
         if st.checkbox("Show extracted text"):
@@ -287,27 +307,33 @@ def main():
                 # Excel Export
                 output_excel = "indian_financial_analysis.xlsx"
                 
-                with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name="Financial Data")
-                    if not ratios.empty:
-                        ratios.to_excel(writer, sheet_name="Financial Ratios")
+                try:
+                    with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
+                        df.to_excel(writer, sheet_name="Financial Data")
+                        if not ratios.empty:
+                            ratios.to_excel(writer, sheet_name="Financial Ratios")
+                        
+                        # Formatting
+                        workbook = writer.book
+                        for sheetname in writer.sheets:
+                            ws = writer.sheets[sheetname]
+                            for col in ws.columns:
+                                for cell in col:
+                                    if cell.row == 1:  # Header row
+                                        cell.font = Font(bold=True)
                     
-                    # Formatting
-                    workbook = writer.book
-                    for sheetname in writer.sheets:
-                        ws = writer.sheets[sheetname]
-                        for col in ws.columns:
-                            for cell in col:
-                                if cell.row == 1:  # Header row
-                                    cell.font = Font(bold=True)
+                    with open(output_excel, "rb") as f:
+                        st.download_button(
+                            label="Download Analysis (Excel)",
+                            data=f,
+                            file_name="indian_financial_analysis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    logger.info("Excel file generated and ready for download")
                 
-                with open(output_excel, "rb") as f:
-                    st.download_button(
-                        label="Download Analysis (Excel)",
-                        data=f,
-                        file_name="indian_financial_analysis.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                except Exception as e:
+                    logger.error(f"Excel export error: %s", str(e))
+                    st.error(f"Excel export failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
