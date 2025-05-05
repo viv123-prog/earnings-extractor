@@ -1,6 +1,6 @@
 import streamlit as st
 import fitz  # PyMuPDF
-import openai
+from openai import OpenAI
 import pandas as pd
 import re
 import json
@@ -18,11 +18,12 @@ try:
         st.error("❌ Missing API key. Add it to secrets.toml as 'openai_api_key = \"sk-...\"'")
         st.stop()
 
-    openai.api_key = st.secrets["openai_api_key"]
+    # Create OpenAI client with the API key
+    client = OpenAI(api_key=st.secrets["openai_api_key"])
 
     with st.spinner("🔌 Testing OpenAI connection..."):
         # Test with a simple call (Model list)
-        openai.models.list()
+        client.models.list()
 
     st.success("✅ OpenAI connected successfully!")
 
